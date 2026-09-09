@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>allofculture — explorable relational database of culture</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
+  #top { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#161a22; border-bottom:1px solid #2a2f3a; flex-wrap:wrap; }
+  #top h1 { font-size:16px; margin:0; }
+  #top .dim { color:#8a93a6; font-size:12px; }
+  input, button { background:#222836; color:#e6e6e6; border:1px solid #3a4152; border-radius:6px; padding:6px 10px; font-size:13px; }
+  button { cursor:pointer; }
+  button:hover { background:#2c3345; }
+  #main { display:flex; height:calc(100vh - 52px); }
+  #graph { flex:1; }
+  #side { width:340px; border-left:1px solid #2a2f3a; padding:14px; overflow-y:auto; font-size:13px; }
+  #side h2 { font-size:14px; margin:0 0 8px; }
+  .claim { border:1px solid #2a2f3a; border-radius:8px; padding:8px 10px; margin-bottom:8px; background:#161a22; }
+  .claim .rel { font-weight:600; color:#7aa2ff; }
+  .claim .src { color:#8a93a6; font-size:11px; word-break:break-all; }
+  .badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:10px; margin-left:6px; }
+  .v { background:#1f3d2b; color:#7ee2a8; }
+  .u { background:#3d2f1f; color:#e2c07e; }
+  .legend { font-size:11px; color:#8a93a6; margin-top:10px; }
+  .legend span { display:inline-block; margin:2px 6px 2px 0; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+</style>
+</head>
+<body>
+<div id="top">
+  <h1>allofculture</h1>
+  <span class="dim" id="stats"></span>
+  <input id="q" placeholder="Find a node…" list="nodelist">
+  <datalist id="nodelist"></datalist>
+  <button onclick="focusNode()">Focus</button>
+  <span class="dim">|</span>
+  <input id="from" placeholder="from" list="nodelist">
+  <input id="to" placeholder="to" list="nodelist">
+  <button onclick="showPath()">Path</button>
+  <button onclick="resetView()">Reset</button>
+</div>
+<div id="main">
+  <div id="graph"></div>
+  <div id="side"><h2>Details</h2><div id="details">Click a node to see its attributed claims.</div></div>
+</div>
+<script>
+const TYPE_COLORS = {
+  work:"#7aa2ff", person:"#7ee2a8", band:"#7ee2a8", movement:"#e2c07e",
+  genre:"#c792ea", place:"#f78c6c", concept:"#ff9e64", medium:"#89ddff"
+};
+let nodes = new vis.DataSet(), edges = new vis.DataSet(), network, allData;
+
+const container = document.getElementById("graph");
+const options = {
+  nodes: { shape:"dot", size:14, font:{color:"#e6e6e6", size:13}, borderWidth:2 },
+  edges: { arrows:"to", color:{color:"#4a5266", highlight:"#7aa2ff"}, font:{color:"#8a93a6", size:10, strokeWidth:0} },
+  physics: { barnesHut: { gravitationalConstant:-4000, springLength:120 } },
+  interaction: { hover:true, tooltipDelay:150 }
+};
+
+async function load() {
+  allData = await (await fetch("/api/graph")).json();
+  const st = await (await fetch("/api/stats")).json();
+  document.getElementById("stats").textContent =
+    `${st.nodes} nodes · ${st.edges} claims · ${st.verified} verified`;
+  const dl = document.getElementById("nodelist");
+  allData.nodes.forEach(n => { const o=document.createElement("option"); o.value=n.name; dl.appendChild(o); });
+  render();
+}
+function render() {
+  nodes.clear(); edges.clear();
+  allData.nodes.forEach(n => nodes.add({ id:n.id, label:n.name, color:TYPE_COLORS[n.type]||"#888", title:`${n.type}${n.year? " · "+n.year:""}` }));
+  allData.edges.forEach(e => edges.add({ from:e.source_id, to:e.target_id, label:e.relation, title:`${e.relation} — conf ${e.confidence}${e.verified?" ✓":""}` }));
+  network = new vis.Network(container, { nodes, edges }, options);
+  network.on("click", p => { if (p.nodes.length) showNode(p.nodes[0]); });
+}
+async function showNode(id) {
+  const n = allData.nodes.find(x => x.id === id);
+  const res = await (await fetch("/api/node?name="+encodeURIComponent(n.name))).json();
+  let html = `<h2>${n.name}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}</p>`;
+  if (n.description) html += `<p>${n.description}</p>`;
+  html += "<h2>Claims</h2>";
+  res.neighbors.forEach(r => {
+    const badge = r.verified ? '<span class="badge v">verified</span>' : '<span class="badge u">unverified</span>';
+    html += `<div class="claim"><span class="rel">${r.relation}</span> → ${r.name} ${badge}<br>
+             <span class="dim">conf ${r.confidence}</span>${r.note? " · "+r.note:""}<br>
+             <span class="src">${r.source? r.source : "no source"}</span></div>`;
+  });
+  document.getElementById("details").innerHTML = html;
+}
+async function focusNode() {
+  const name = document.getElementById("q").value;
+  const n = allData.nodes.find(x => x.name === name);
+  if (n) { network.focus(n.id, {scale:1.4}); showNode(n.id); }
+}
+async function showPath() {
+  const a = document.getElementById("from").value, b = document.getElementById("to").value;
+  const res = await (await fetch(`/api/path?from=${encodeURIComponent(a)}&to=${encodeURIComponent(b)}`)).json();
+  if (!res.path) { document.getElementById("details").innerHTML = "<p>No path found.</p>"; return; }
+  let html = "<h2>Path</h2>";
+  res.path.forEach((s,i) => {
+    html += `<div class="claim"><b>${s.name}</b>${s.relation? ` <span class="rel">—${s.relation}→</span>`:""}</div>`;
+  });
+  document.getElementById("details").innerHTML = html;
+  network.selectNodes(res.path.map(s=>s.id));
+  network.fit({ nodes: res.path.map(s=>s.id) });
+}
+function resetView() { network.fit(); }
+load();
+</script>
+</body>
+</html>

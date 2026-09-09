@@ -58,3 +58,8 @@ python3 cli.py export > graph.json
 - `seed.py` — illustrative seed cluster (hip-hop sampling + visual collage)
 - `server.py` — zero-dependency HTTP server (JSON API + static UI)
 - `web/index.html` — vis.js graph explorer
+- `export_static.py` — dump the DB to `web/data.json` for static hosting
+- `deploy_pages.sh` — build + push the `gh-pages` branch
+
+## License
+[BSD Zero Clause](LICENSE) — do whatever you want with it.

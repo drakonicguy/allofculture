@@ -5,14 +5,15 @@
 <title>allofculture — explorable relational database of culture</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
-  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; display:flex; flex-direction:column; height:100vh; }
   #top { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#161a22; border-bottom:1px solid #2a2f3a; flex-wrap:wrap; }
   #top h1 { font-size:16px; margin:0; }
   #top .dim { color:#8a93a6; font-size:12px; }
   input, button { background:#222836; color:#e6e6e6; border:1px solid #3a4152; border-radius:6px; padding:6px 10px; font-size:13px; }
   button { cursor:pointer; }
   button:hover { background:#2c3345; }
-  #main { display:flex; height:calc(100vh - 52px); }
+  #main { display:flex; flex:1; min-height:0; }
+  #foot { padding:6px 16px; font-size:11px; color:#5a6375; border-top:1px solid #2a2f3a; background:#161a22; text-align:center; }
   #graph { flex:1; }
   #side { width:340px; border-left:1px solid #2a2f3a; padding:14px; overflow-y:auto; font-size:13px; }
   #side h2 { font-size:14px; margin:0 0 8px; }
@@ -46,6 +47,7 @@
   <div id="graph"></div>
   <div id="side"><h2>Details</h2><div id="details">Click a node to see its attributed claims and expand its neighborhood.</div></div>
 </div>
+<div id="foot">Generated with Deepseek v4 Flash via Ollama Cloud, using the Claude Code harness. Steered by drakonic.</div>
 <script>
 const TYPE_COLORS = {
   work:"#7aa2ff", person:"#7ee2a8", band:"#7ee2a8", movement:"#e2c07e",

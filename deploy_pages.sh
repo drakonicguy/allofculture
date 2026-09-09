@@ -17,6 +17,6 @@ cp "$TMP/index.html" "$TMP/data.json" .
 git add index.html data.json
 git commit -m "deploy: static allofculture explorer"
 git push -f origin gh-pages
-git checkout master
+git checkout main
 rm -rf "$TMP"
 echo "deployed to gh-pages — enable Pages at Settings > Pages > branch: gh-pages"

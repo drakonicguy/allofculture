@@ -19,6 +19,8 @@
   .claim { border:1px solid #2a2f3a; border-radius:8px; padding:8px 10px; margin-bottom:8px; background:#161a22; }
   .claim .rel { font-weight:600; color:#7aa2ff; }
   .claim .src { color:#8a93a6; font-size:11px; word-break:break-all; }
+  .claim .src a { color:#7aa2ff; text-decoration:none; }
+  .claim .src a:hover { text-decoration:underline; }
   .badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:10px; margin-left:6px; }
   .v { background:#1f3d2b; color:#7ee2a8; }
   .u { background:#3d2f1f; color:#e2c07e; }
@@ -42,70 +44,171 @@
 </div>
 <div id="main">
   <div id="graph"></div>
-  <div id="side"><h2>Details</h2><div id="details">Click a node to see its attributed claims.</div></div>
+  <div id="side"><h2>Details</h2><div id="details">Click a node to see its attributed claims and expand its neighborhood.</div></div>
 </div>
 <script>
 const TYPE_COLORS = {
   work:"#7aa2ff", person:"#7ee2a8", band:"#7ee2a8", movement:"#e2c07e",
   genre:"#c792ea", place:"#f78c6c", concept:"#ff9e64", medium:"#89ddff"
 };
-let nodes = new vis.DataSet(), edges = new vis.DataSet(), network, allData;
+let nodes = new vis.DataSet(), edges = new vis.DataSet(), network;
+const expanded = new Set();
+
+// ---- in-memory graph (loaded once from data.json) ----
+let DATA;
+const byId = new Map(), byName = new Map(), adj = new Map();
+
+function buildIndexes() {
+  DATA.nodes.forEach(n => { byId.set(n.id, n); byName.set(n.name, n); adj.set(n.id, []); });
+  DATA.edges.forEach(e => {
+    adj.get(e.source_id).push({ id:e.target_id, source_id:e.source_id, target_id:e.target_id,
+      relation:e.relation, weight:e.weight, note:e.note, source:e.source, source_type:e.source_type,
+      confidence:e.confidence, verified:e.verified });
+    adj.get(e.target_id).push({ id:e.source_id, source_id:e.source_id, target_id:e.target_id,
+      relation:e.relation, weight:e.weight, note:e.note, source:e.source, source_type:e.source_type,
+      confidence:e.confidence, verified:e.verified });
+  });
+}
+function neighborsOf(id) {
+  return (adj.get(id) || []).map(e => ({ ...byId.get(e.id), ...e }));
+}
+function startNode() {
+  const g = DATA.nodes.find(n => n.qid === "Q8272");  // The Epic of Gilgamesh
+  if (g) return g;
+  const deg = new Map();
+  DATA.edges.forEach(e => { deg.set(e.source_id, (deg.get(e.source_id)||0)+1); deg.set(e.target_id, (deg.get(e.target_id)||0)+1); });
+  let best = DATA.nodes[0];
+  DATA.nodes.forEach(n => { if ((deg.get(n.id)||0) > (deg.get(best.id)||0)) best = n; });
+  return best;
+}
+function bfsPath(a, b) {
+  if (!byName.has(a) || !byName.has(b)) return null;
+  const start = byName.get(a).id, goal = byName.get(b).id;
+  if (start === goal) return [{ id:start, name:a, relation:null }];
+  const prev = new Map([[start, null]]), rel = new Map();
+  const dq = [start];
+  while (dq.length) {
+    const cur = dq.shift();
+    if (cur === goal) break;
+    for (const e of adj.get(cur) || []) {
+      if (!prev.has(e.id)) { prev.set(e.id, cur); rel.set(e.id, e.relation); dq.push(e.id); }
+    }
+  }
+  if (!prev.has(goal)) return null;
+  const path = []; let cur = goal;
+  while (cur !== null) { path.push(cur); cur = prev.get(cur); }
+  path.reverse();
+  return path.map(id => ({ id, name: byId.get(id).name, relation: rel.get(id) }));
+}
 
 const container = document.getElementById("graph");
 const options = {
   nodes: { shape:"dot", size:14, font:{color:"#e6e6e6", size:13}, borderWidth:2 },
   edges: { arrows:"to", color:{color:"#4a5266", highlight:"#7aa2ff"}, font:{color:"#8a93a6", size:10, strokeWidth:0} },
-  physics: { barnesHut: { gravitationalConstant:-4000, springLength:120 } },
+  physics: { stabilization:false, barnesHut:{ gravitationalConstant:-4000, springLength:120 } },
   interaction: { hover:true, tooltipDelay:150 }
 };
 
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function srcLink(src) {
+  if (/^https?:\/\//i.test(src)) return `<a href="${esc(src)}" target="_blank" rel="noopener noreferrer">${esc(src)}</a>`;
+  return esc(src);
+}
+function nodeObj(n) {
+  return { id:n.id, label:n.name, type:n.type, year:n.year,
+           color:TYPE_COLORS[n.type]||"#888", title:`${n.type}${n.year? " · "+n.year:""}` };
+}
+function edgeObj(e) {
+  return { id:`${e.source_id}-${e.target_id}-${e.relation}`, from:e.source_id, to:e.target_id,
+           label:e.relation, title:`${e.relation} — conf ${e.confidence}${e.verified?" ✓":""}` };
+}
+function addSubgraph(node, nbrs) {
+  if (!node) return;
+  if (!nodes.get(node.id)) nodes.add(nodeObj(node));
+  (nbrs||[]).forEach(r => {
+    if (!nodes.get(r.id)) nodes.add(nodeObj(r));
+    const eid = `${r.source_id}-${r.target_id}-${r.relation}`;
+    if (!edges.get(eid)) edges.add(edgeObj(r));
+  });
+  expanded.add(node.id);
+}
+
 async function load() {
-  allData = await (await fetch("/api/graph")).json();
-  const st = await (await fetch("/api/stats")).json();
+  const res = await fetch("data.json");
+  DATA = await res.json();
+  buildIndexes();
+  const st = DATA.stats;
   document.getElementById("stats").textContent =
     `${st.nodes} nodes · ${st.edges} claims · ${st.verified} verified`;
   const dl = document.getElementById("nodelist");
-  allData.nodes.forEach(n => { const o=document.createElement("option"); o.value=n.name; dl.appendChild(o); });
-  render();
-}
-function render() {
-  nodes.clear(); edges.clear();
-  allData.nodes.forEach(n => nodes.add({ id:n.id, label:n.name, color:TYPE_COLORS[n.type]||"#888", title:`${n.type}${n.year? " · "+n.year:""}` }));
-  allData.edges.forEach(e => edges.add({ from:e.source_id, to:e.target_id, label:e.relation, title:`${e.relation} — conf ${e.confidence}${e.verified?" ✓":""}` }));
+  DATA.nodes.map(n => n.name).sort().forEach(n => { const o=document.createElement("option"); o.value=n; dl.appendChild(o); });
+  const start = startNode();
+  addSubgraph(start, neighborsOf(start.id));
   network = new vis.Network(container, { nodes, edges }, options);
-  network.on("click", p => { if (p.nodes.length) showNode(p.nodes[0]); });
+  network.on("click", p => { if (p.nodes.length) { const id = p.nodes[0]; showNode(id); expandNode(id); } });
+  network.fit();
 }
-async function showNode(id) {
-  const n = allData.nodes.find(x => x.id === id);
-  const res = await (await fetch("/api/node?name="+encodeURIComponent(n.name))).json();
-  let html = `<h2>${n.name}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}</p>`;
-  if (n.description) html += `<p>${n.description}</p>`;
+
+function expandNode(id) {
+  if (expanded.has(id)) return;
+  const n = byId.get(id);
+  if (!n) return;
+  addSubgraph(n, neighborsOf(id));
+}
+
+function showNode(id) {
+  const n = byId.get(id);
+  if (!n) return;
+  let html = `<h2>${esc(n.name)}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}</p>`;
+  if (n.description) html += `<p>${esc(n.description)}</p>`;
   html += "<h2>Claims</h2>";
-  res.neighbors.forEach(r => {
+  neighborsOf(id).forEach(r => {
     const badge = r.verified ? '<span class="badge v">verified</span>' : '<span class="badge u">unverified</span>';
-    html += `<div class="claim"><span class="rel">${r.relation}</span> → ${r.name} ${badge}<br>
-             <span class="dim">conf ${r.confidence}</span>${r.note? " · "+r.note:""}<br>
-             <span class="src">${r.source? r.source : "no source"}</span></div>`;
+    html += `<div class="claim"><span class="rel">${esc(r.relation)}</span> → ${esc(r.name)} ${badge}<br>
+             <span class="dim">conf ${r.confidence}</span>${r.note? " · "+esc(r.note):""}<br>
+             <span class="src">${r.source? srcLink(r.source) : "no source"}</span></div>`;
   });
   document.getElementById("details").innerHTML = html;
 }
-async function focusNode() {
+
+function focusNode() {
   const name = document.getElementById("q").value;
-  const n = allData.nodes.find(x => x.name === name);
-  if (n) { network.focus(n.id, {scale:1.4}); showNode(n.id); }
+  if (!name) return;
+  let found = nodes.get({ filter: n => n.label === name });
+  let n = found.length ? found[0] : null;
+  if (!n) {
+    const node = byName.get(name);
+    if (!node) { document.getElementById("details").innerHTML = "<p>Not found.</p>"; return; }
+    addSubgraph(node, neighborsOf(node.id));
+    n = nodes.get(node.id);
+  }
+  network.focus(n.id, {scale:1.4});
+  showNode(n.id);
+  expandNode(n.id);
 }
-async function showPath() {
+
+function showPath() {
   const a = document.getElementById("from").value, b = document.getElementById("to").value;
-  const res = await (await fetch(`/api/path?from=${encodeURIComponent(a)}&to=${encodeURIComponent(b)}`)).json();
-  if (!res.path) { document.getElementById("details").innerHTML = "<p>No path found.</p>"; return; }
+  if (!a || !b) return;
+  const path = bfsPath(a, b);
+  if (!path) { document.getElementById("details").innerHTML = "<p>No path found.</p>"; return; }
   let html = "<h2>Path</h2>";
-  res.path.forEach((s,i) => {
-    html += `<div class="claim"><b>${s.name}</b>${s.relation? ` <span class="rel">—${s.relation}→</span>`:""}</div>`;
+  path.forEach((s,i) => {
+    html += `<div class="claim"><b>${esc(s.name)}</b>${s.relation? ` <span class="rel">—${esc(s.relation)}→</span>`:""}</div>`;
+    if (!nodes.get(s.id)) nodes.add({ id:s.id, label:s.name, type:"work", color:"#888", title:"path" });
+    if (i > 0) {
+      const prev = path[i-1];
+      const eid = `${prev.id}-${s.id}-${s.relation}`;
+      if (!edges.get(eid)) edges.add({ id:eid, from:prev.id, to:s.id, label:s.relation });
+    }
   });
   document.getElementById("details").innerHTML = html;
-  network.selectNodes(res.path.map(s=>s.id));
-  network.fit({ nodes: res.path.map(s=>s.id) });
+  network.selectNodes(path.map(s=>s.id));
+  network.fit({ nodes: path.map(s=>s.id) });
 }
+
 function resetView() { network.fit(); }
 load();
 </script>

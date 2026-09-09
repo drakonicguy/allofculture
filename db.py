@@ -7,16 +7,20 @@ def connect(path=DB):
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA busy_timeout = 5000")  # wait for locks instead of failing immediately
     return con
 
-def add_node(con, type_, name, year=None, description=None, meta=None):
+def add_node(con, type_, name, year=None, description=None, meta=None, qid=None):
     cur = con.execute(
-        "INSERT INTO nodes(type,name,year,description,meta) VALUES(?,?,?,?,?)",
-        (type_, name, year, description, json.dumps(meta) if meta else None))
+        "INSERT INTO nodes(type,name,year,description,meta,qid) VALUES(?,?,?,?,?,?)",
+        (type_, name, year, description, json.dumps(meta) if meta else None, qid))
     return cur.lastrowid
 
 def get_node(con, name):
     return con.execute("SELECT * FROM nodes WHERE name=?", (name,)).fetchone()
+
+def get_node_by_qid(con, qid):
+    return con.execute("SELECT * FROM nodes WHERE qid=?", (qid,)).fetchone()
 
 def add_edge(con, source, target, relation, weight=1.0, note=None,
              source_url=None, source_type=None, confidence=0.5, verified=0):
@@ -35,12 +39,12 @@ def add_edge(con, source, target, relation, weight=1.0, note=None,
 def neighbors(con, name, relation=None, direction="both"):
     n = get_node(con, name)
     if not n: return []
-    q = ("SELECT n.*, e.relation, e.weight, e.note, e.source, e.source_type, "
+    q = ("SELECT n.*, e.source_id, e.target_id, e.relation, e.weight, e.note, e.source, e.source_type, "
          "e.confidence, e.verified FROM edges e "
          "JOIN nodes n ON n.id = e.target_id WHERE e.source_id=?")
     p = [n["id"]]
     if direction in ("both", "in"):
-        q += " UNION ALL SELECT n.*, e.relation, e.weight, e.note, e.source, e.source_type, e.confidence, e.verified FROM edges e JOIN nodes n ON n.id=e.source_id WHERE e.target_id=?"
+        q += " UNION ALL SELECT n.*, e.source_id, e.target_id, e.relation, e.weight, e.note, e.source, e.source_type, e.confidence, e.verified FROM edges e JOIN nodes n ON n.id=e.source_id WHERE e.target_id=?"
         p.append(n["id"])
     rows = con.execute(q, p).fetchall()
     if relation:

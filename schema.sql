@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   name        TEXT NOT NULL,
   year        INTEGER,
   description TEXT,
-  meta        TEXT                     -- JSON blob for extra fields
+  meta        TEXT,                    -- JSON blob for extra fields
+  qid         TEXT                     -- Wikidata QID (for dedup)
 );
 
 -- Every edge is a CLAIM. It must be attributable:
@@ -36,3 +37,4 @@ CREATE INDEX IF NOT EXISTS idx_edge_target ON edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_edge_rel    ON edges(relation);
 CREATE INDEX IF NOT EXISTS idx_node_type   ON nodes(type);
 CREATE INDEX IF NOT EXISTS idx_node_name   ON nodes(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_qid ON nodes(qid);  -- one Wikidata item = one node

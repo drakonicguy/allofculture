@@ -9,6 +9,24 @@ sampling, collage, covers, remixes, parody, influence, membership, and more.
 python3 server.py 8000     # open http://localhost:8000
 ```
 
+## Deploy to GitHub Pages (free, static)
+The explorer is fully client-side — it loads the whole graph from `web/data.json`
+once, so it needs no server. To publish:
+
+1. Create a GitHub repo and add it as `origin`:
+   ```bash
+   git remote add origin git@github.com:USER/REPO.git
+   ```
+2. Push the code, then deploy the static site:
+   ```bash
+   git push -u origin master
+   ./deploy_pages.sh
+   ```
+3. In the repo's **Settings → Pages**, set the source to branch `gh-pages`.
+
+After any DB change, re-run `./deploy_pages.sh` to refresh the live site.
+(`python3 export_static.py` alone just regenerates `web/data.json` locally.)
+
 ## CLI
 ```bash
 python3 cli.py stats

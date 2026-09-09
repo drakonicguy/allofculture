@@ -8,6 +8,9 @@ import db
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(ROOT, "web")
 
+# Starting node for the explorer (Wikidata QID). Falls back to the highest-degree node.
+START_QID = "Q8272"  # The Epic of Gilgamesh
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
@@ -38,12 +41,29 @@ class H(BaseHTTPRequestHandler):
         con = db.connect()
         if u.path == "/" or u.path == "/index.html":
             return self._file("index.html")
+        if u.path == "/data.json":
+            return self._file("data.json")
         if u.path.startswith("/web/"):
             return self._file(u.path[5:])
         if u.path == "/api/graph":
             return self._json(db.export(con))
         if u.path == "/api/stats":
             return self._json(db.stats(con))
+        if u.path == "/api/names":
+            names = [r["name"] for r in con.execute("SELECT name FROM nodes ORDER BY name")]
+            return self._json({"names": names})
+        if u.path == "/api/start":
+            row = None
+            if START_QID:
+                row = con.execute("SELECT name FROM nodes WHERE qid=?", (START_QID,)).fetchone()
+            if not row:
+                row = con.execute("""
+                    SELECT n.name FROM nodes n
+                    LEFT JOIN edges e ON e.source_id=n.id OR e.target_id=n.id
+                    GROUP BY n.id ORDER BY COUNT(e.id) DESC LIMIT 1""").fetchone()
+            name = row["name"]
+            return self._json({"node": dict(db.get_node(con, name)),
+                               "neighbors": [dict(r) for r in db.neighbors(con, name)]})
         if u.path == "/api/node":
             q = parse_qs(u.query)
             name = q.get("name", [""])[0]

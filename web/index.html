@@ -168,7 +168,10 @@ function showNode(id) {
   html += "<h2>Claims</h2>";
   neighborsOf(id).forEach(r => {
     const badge = r.verified ? '<span class="badge v">verified</span>' : '<span class="badge u">unverified</span>';
-    html += `<div class="claim"><span class="rel">${esc(r.relation)}</span> → ${esc(r.name)} ${badge}<br>
+    const rel = `<span class="rel">${esc(r.relation)}</span>`;
+    // edges are directional claims: source --relation--> target. Show the direction.
+    const claim = r.source_id === id ? `${rel} → ${esc(r.name)}` : `${esc(r.name)} → ${rel}`;
+    html += `<div class="claim">${claim} ${badge}<br>
              <span class="dim">conf ${r.confidence}</span>${r.note? " · "+esc(r.note):""}<br>
              <span class="src">${r.source? srcLink(r.source) : "no source"}</span></div>`;
   });

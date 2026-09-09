@@ -63,3 +63,7 @@ python3 cli.py export > graph.json
 
 ## License
 [BSD Zero Clause](LICENSE) — do whatever you want with it.
+
+## Attribution
+Generated with Deepseek v4 Flash via Ollama Cloud, using the Claude Code harness.
+Steered by drakonic.

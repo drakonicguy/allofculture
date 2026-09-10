@@ -69,7 +69,7 @@
 <script>
 const TYPE_COLORS = {
   work:"#7aa2ff", person:"#7ee2a8", band:"#7ee2a8", movement:"#e2c07e",
-  genre:"#c792ea", place:"#f78c6c", concept:"#ff9e64", medium:"#89ddff"
+  genre:"#c792ea", place:"#f78c6c", concept:"#ff9e64"
 };
 let nodes = new vis.DataSet(), edges = new vis.DataSet(), network;
 const expanded = new Set();
@@ -194,19 +194,10 @@ function expandNode(id) {
   addSubgraph(n, neighborsOf(id));
 }
 
-function mediumOf(id) {
-  const n = byId.get(id);
-  if (!n) return null;
-  const med = neighborsOf(id).find(r => r.relation === "uses" && r.type === "medium");
-  return med ? med.name : null;
-}
 function showNode(id) {
   const n = byId.get(id);
   if (!n) return;
-  let html = `<h2>${esc(n.name)}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}`;
-  const med = mediumOf(id);
-  if (med) html += ` · <span class="rel">${esc(med)}</span>`;
-  html += `</p>`;
+  let html = `<h2>${esc(n.name)}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}</p>`;
   if (n.description) html += `<p>${esc(n.description)}</p>`;
   html += "<h2>Claims</h2>";
   neighborsOf(id).forEach(r => {

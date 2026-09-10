@@ -28,6 +28,15 @@
   .legend { font-size:11px; color:#8a93a6; margin-top:10px; }
   .legend span { display:inline-block; margin:2px 6px 2px 0; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+  #start-modal { position:fixed; inset:0; background:rgba(8,10,14,0.88); display:flex; align-items:center; justify-content:center; z-index:100; }
+  #start-modal.hidden { display:none; }
+  .modal-card { background:#161a22; border:1px solid #2a2f3a; border-radius:12px; padding:28px 32px; width:440px; max-width:92vw; box-shadow:0 24px 70px rgba(0,0,0,0.55); }
+  .modal-card h2 { margin:0 0 6px; font-size:20px; }
+  .modal-card p { margin:0 0 16px; }
+  #start-input { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px; margin-bottom:12px; }
+  #start-btn { width:100%; padding:10px; font-size:14px; background:#2c3345; }
+  #start-btn:hover { background:#3a4152; }
+  #start-hint { color:#e2c07e; font-size:12px; margin:8px 0 0; min-height:16px; }
 </style>
 </head>
 <body>
@@ -48,6 +57,15 @@
   <div id="side"><h2>Details</h2><div id="details">Click a node to see its attributed claims and expand its neighborhood.</div></div>
 </div>
 <div id="foot">Generated with Deepseek v4 Flash via Ollama Cloud, using the Claude Code harness. Steered by drakonic.</div>
+<div id="start-modal">
+  <div class="modal-card">
+    <h2>allofculture</h2>
+    <p class="dim">An explorable relational database of culture. Where do you want to start?</p>
+    <input id="start-input" list="nodelist" value="The Epic of Gilgamesh" autocomplete="off">
+    <button id="start-btn">Start exploring</button>
+    <p class="dim" id="start-hint"></p>
+  </div>
+</div>
 <script>
 const TYPE_COLORS = {
   work:"#7aa2ff", person:"#7ee2a8", band:"#7ee2a8", movement:"#e2c07e",
@@ -146,7 +164,23 @@ async function load() {
     `${st.nodes} nodes · ${st.edges} claims · ${st.verified} verified`;
   const dl = document.getElementById("nodelist");
   DATA.nodes.map(n => n.name).sort().forEach(n => { const o=document.createElement("option"); o.value=n; dl.appendChild(o); });
-  const start = startNode();
+  document.getElementById("start-modal").classList.remove("hidden");
+  const inp = document.getElementById("start-input");
+  inp.focus(); inp.select();
+}
+
+function startExploring() {
+  const name = document.getElementById("start-input").value.trim();
+  const node = byName.get(name);
+  if (!node) {
+    document.getElementById("start-hint").textContent = `"${name}" not found — try another name.`;
+    return;
+  }
+  document.getElementById("start-modal").classList.add("hidden");
+  initNetwork(node);
+}
+
+function initNetwork(start) {
   addSubgraph(start, neighborsOf(start.id));
   network = new vis.Network(container, { nodes, edges }, options);
   network.on("click", p => { if (p.nodes.length) { const id = p.nodes[0]; showNode(id); expandNode(id); } });
@@ -160,10 +194,19 @@ function expandNode(id) {
   addSubgraph(n, neighborsOf(id));
 }
 
+function mediumOf(id) {
+  const n = byId.get(id);
+  if (!n) return null;
+  const med = neighborsOf(id).find(r => r.relation === "uses" && r.type === "medium");
+  return med ? med.name : null;
+}
 function showNode(id) {
   const n = byId.get(id);
   if (!n) return;
-  let html = `<h2>${esc(n.name)}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}</p>`;
+  let html = `<h2>${esc(n.name)}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}`;
+  const med = mediumOf(id);
+  if (med) html += ` · <span class="rel">${esc(med)}</span>`;
+  html += `</p>`;
   if (n.description) html += `<p>${esc(n.description)}</p>`;
   html += "<h2>Claims</h2>";
   neighborsOf(id).forEach(r => {
@@ -215,6 +258,8 @@ function showPath() {
 }
 
 function resetView() { network.fit(); }
+document.getElementById("start-btn").addEventListener("click", startExploring);
+document.getElementById("start-input").addEventListener("keydown", e => { if (e.key === "Enter") startExploring(); });
 load();
 </script>
 </body>

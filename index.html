@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>allofculture — explorable relational database of culture</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; display:flex; flex-direction:column; height:100vh; }
+  #top { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#161a22; border-bottom:1px solid #2a2f3a; flex-wrap:wrap; }
+  #top h1 { font-size:16px; margin:0; }
+  #top .dim { color:#8a93a6; font-size:12px; }
+  input, button { background:#222836; color:#e6e6e6; border:1px solid #3a4152; border-radius:6px; padding:6px 10px; font-size:13px; }
+  button { cursor:pointer; }
+  button:hover { background:#2c3345; }
+  #main { display:flex; flex:1; min-height:0; }
+  #foot { padding:6px 16px; font-size:11px; color:#5a6375; border-top:1px solid #2a2f3a; background:#161a22; text-align:center; }
+  #graph { flex:1; }
+  #side { width:340px; border-left:1px solid #2a2f3a; padding:14px; overflow-y:auto; font-size:13px; }
+  #side h2 { font-size:14px; margin:0 0 8px; }
+  .claim { border:1px solid #2a2f3a; border-radius:8px; padding:8px 10px; margin-bottom:8px; background:#161a22; }
+  .claim .rel { font-weight:600; color:#7aa2ff; }
+  .claim .src { color:#8a93a6; font-size:11px; word-break:break-all; }
+  .claim .src a { color:#7aa2ff; text-decoration:none; }
+  .claim .src a:hover { text-decoration:underline; }
+  .badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:10px; margin-left:6px; }
+  .v { background:#1f3d2b; color:#7ee2a8; }
+  .u { background:#3d2f1f; color:#e2c07e; }
+  .legend { font-size:11px; color:#8a93a6; margin-top:10px; }
+  .legend span { display:inline-block; margin:2px 6px 2px 0; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+  #start-modal { position:fixed; inset:0; background:rgba(8,10,14,0.88); display:flex; align-items:center; justify-content:center; z-index:100; }
+  #start-modal.hidden { display:none; }
+  .modal-card { background:#161a22; border:1px solid #2a2f3a; border-radius:12px; padding:28px 32px; width:440px; max-width:92vw; box-shadow:0 24px 70px rgba(0,0,0,0.55); }
+  .modal-card h2 { margin:0 0 6px; font-size:20px; }
+  .modal-card p { margin:0 0 16px; }
+  #start-input { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px; margin-bottom:12px; }
+  #start-btn { width:100%; padding:10px; font-size:14px; background:#2c3345; }
+  #start-btn:hover { background:#3a4152; }
+  #start-hint { color:#e2c07e; font-size:12px; margin:8px 0 0; min-height:16px; }
+</style>
+</head>
+<body>
+<div id="top">
+  <h1>allofculture</h1>
+  <span class="dim" id="stats"></span>
+  <input id="q" placeholder="Find a node…" list="nodelist">
+  <datalist id="nodelist"></datalist>
+  <button onclick="focusNode()">Focus</button>
+  <span class="dim">|</span>
+  <input id="from" placeholder="from" list="nodelist">
+  <input id="to" placeholder="to" list="nodelist">
+  <button onclick="showPath()">Path</button>
+  <button onclick="resetView()">Reset</button>
+</div>
+<div id="main">
+  <div id="graph"></div>
+  <div id="side"><h2>Details</h2><div id="details">Click a node to see its attributed claims and expand its neighborhood.</div></div>
+</div>
+<div id="foot">Generated with Deepseek v4 Flash via Ollama Cloud, using the Claude Code harness. Steered by drakonic.</div>
+<div id="start-modal">
+  <div class="modal-card">
+    <h2>allofculture</h2>
+    <p class="dim">An explorable relational database of culture. Where do you want to start?</p>
+    <input id="start-input" list="nodelist" value="The Epic of Gilgamesh" autocomplete="off">
+    <button id="start-btn">Start exploring</button>
+    <p class="dim" id="start-hint"></p>
+  </div>
+</div>
+<script>
+const TYPE_COLORS = {
+  work:"#7aa2ff", author:"#7ee2a8"
+};
+let nodes = new vis.DataSet(), edges = new vis.DataSet(), network;
+const expanded = new Set();
+
+// ---- in-memory graph (loaded once from data.json) ----
+let DATA;
+const byId = new Map(), byName = new Map(), adj = new Map();
+
+function buildIndexes() {
+  DATA.nodes.forEach(n => { byId.set(n.id, n); byName.set(n.name, n); adj.set(n.id, []); });
+  DATA.edges.forEach(e => {
+    adj.get(e.source_id).push({ id:e.target_id, source_id:e.source_id, target_id:e.target_id,
+      relation:e.relation, weight:e.weight, note:e.note, source:e.source, source_type:e.source_type,
+      confidence:e.confidence, verified:e.verified });
+    adj.get(e.target_id).push({ id:e.source_id, source_id:e.source_id, target_id:e.target_id,
+      relation:e.relation, weight:e.weight, note:e.note, source:e.source, source_type:e.source_type,
+      confidence:e.confidence, verified:e.verified });
+  });
+}
+function neighborsOf(id) {
+  return (adj.get(id) || []).map(e => ({ ...byId.get(e.id), ...e }));
+}
+function startNode() {
+  const g = DATA.nodes.find(n => n.qid === "Q8272");  // The Epic of Gilgamesh
+  if (g) return g;
+  const deg = new Map();
+  DATA.edges.forEach(e => { deg.set(e.source_id, (deg.get(e.source_id)||0)+1); deg.set(e.target_id, (deg.get(e.target_id)||0)+1); });
+  let best = DATA.nodes[0];
+  DATA.nodes.forEach(n => { if ((deg.get(n.id)||0) > (deg.get(best.id)||0)) best = n; });
+  return best;
+}
+function bfsPath(a, b) {
+  if (!byName.has(a) || !byName.has(b)) return null;
+  const start = byName.get(a).id, goal = byName.get(b).id;
+  if (start === goal) return [{ id:start, name:a, relation:null }];
+  const prev = new Map([[start, null]]), rel = new Map();
+  const dq = [start];
+  while (dq.length) {
+    const cur = dq.shift();
+    if (cur === goal) break;
+    for (const e of adj.get(cur) || []) {
+      if (!prev.has(e.id)) { prev.set(e.id, cur); rel.set(e.id, e.relation); dq.push(e.id); }
+    }
+  }
+  if (!prev.has(goal)) return null;
+  const path = []; let cur = goal;
+  while (cur !== null) { path.push(cur); cur = prev.get(cur); }
+  path.reverse();
+  return path.map(id => ({ id, name: byId.get(id).name, relation: rel.get(id) }));
+}
+
+const container = document.getElementById("graph");
+const options = {
+  nodes: { shape:"dot", size:14, font:{color:"#e6e6e6", size:13}, borderWidth:2 },
+  edges: { arrows:"to", color:{color:"#4a5266", highlight:"#7aa2ff"}, font:{color:"#8a93a6", size:10, strokeWidth:0} },
+  physics: { stabilization:false, barnesHut:{ gravitationalConstant:-4000, springLength:120 } },
+  interaction: { hover:true, tooltipDelay:150 }
+};
+
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function srcLink(src) {
+  if (/^https?:\/\//i.test(src)) return `<a href="${esc(src)}" target="_blank" rel="noopener noreferrer">${esc(src)}</a>`;
+  return esc(src);
+}
+function nodeObj(n) {
+  return { id:n.id, label:n.name, type:n.type, year:n.year,
+           color:TYPE_COLORS[n.type]||"#888", title:`${n.type}${n.year? " · "+n.year:""}` };
+}
+function edgeObj(e) {
+  return { id:`${e.source_id}-${e.target_id}-${e.relation}`, from:e.source_id, to:e.target_id,
+           label:e.relation, title:`${e.relation} — conf ${e.confidence}${e.verified?" ✓":""}` };
+}
+function addSubgraph(node, nbrs) {
+  if (!node) return;
+  if (!nodes.get(node.id)) nodes.add(nodeObj(node));
+  (nbrs||[]).forEach(r => {
+    if (!nodes.get(r.id)) nodes.add(nodeObj(r));
+    const eid = `${r.source_id}-${r.target_id}-${r.relation}`;
+    if (!edges.get(eid)) edges.add(edgeObj(r));
+  });
+  expanded.add(node.id);
+}
+
+async function load() {
+  const res = await fetch("data.json");
+  DATA = await res.json();
+  buildIndexes();
+  const st = DATA.stats;
+  document.getElementById("stats").textContent =
+    `${st.nodes} nodes · ${st.edges} claims · ${st.verified} verified`;
+  const dl = document.getElementById("nodelist");
+  DATA.nodes.map(n => n.name).sort().forEach(n => { const o=document.createElement("option"); o.value=n; dl.appendChild(o); });
+  document.getElementById("start-modal").classList.remove("hidden");
+  const inp = document.getElementById("start-input");
+  inp.focus(); inp.select();
+}
+
+function startExploring() {
+  const name = document.getElementById("start-input").value.trim();
+  const node = byName.get(name);
+  if (!node) {
+    document.getElementById("start-hint").textContent = `"${name}" not found — try another name.`;
+    return;
+  }
+  document.getElementById("start-modal").classList.add("hidden");
+  initNetwork(node);
+}
+
+function initNetwork(start) {
+  addSubgraph(start, neighborsOf(start.id));
+  network = new vis.Network(container, { nodes, edges }, options);
+  network.on("click", p => { if (p.nodes.length) { const id = p.nodes[0]; showNode(id); expandNode(id); } });
+  network.fit();
+}
+
+function expandNode(id) {
+  if (expanded.has(id)) return;
+  const n = byId.get(id);
+  if (!n) return;
+  addSubgraph(n, neighborsOf(id));
+}
+
+function showNode(id) {
+  const n = byId.get(id);
+  if (!n) return;
+  let html = `<h2>${esc(n.name)}</h2><p class="dim">${n.type}${n.year? " · "+n.year:""}</p>`;
+  if (n.description) html += `<p>${esc(n.description)}</p>`;
+  html += "<h2>Claims</h2>";
+  neighborsOf(id).forEach(r => {
+    const badge = r.verified ? '<span class="badge v">verified</span>' : '<span class="badge u">unverified</span>';
+    const rel = `<span class="rel">${esc(r.relation)}</span>`;
+    // edges are directional claims: source --relation--> target. Show the direction.
+    const claim = r.source_id === id ? `${rel} → ${esc(r.name)}` : `${esc(r.name)} → ${rel}`;
+    html += `<div class="claim">${claim} ${badge}<br>
+             <span class="dim">conf ${r.confidence}</span>${r.note? " · "+esc(r.note):""}<br>
+             <span class="src">${r.source? srcLink(r.source) : "no source"}</span></div>`;
+  });
+  document.getElementById("details").innerHTML = html;
+}
+
+function focusNode() {
+  const name = document.getElementById("q").value;
+  if (!name) return;
+  let found = nodes.get({ filter: n => n.label === name });
+  let n = found.length ? found[0] : null;
+  if (!n) {
+    const node = byName.get(name);
+    if (!node) { document.getElementById("details").innerHTML = "<p>Not found.</p>"; return; }
+    addSubgraph(node, neighborsOf(node.id));
+    n = nodes.get(node.id);
+  }
+  network.focus(n.id, {scale:1.4});
+  showNode(n.id);
+  expandNode(n.id);
+}
+
+function showPath() {
+  const a = document.getElementById("from").value, b = document.getElementById("to").value;
+  if (!a || !b) return;
+  const path = bfsPath(a, b);
+  if (!path) { document.getElementById("details").innerHTML = "<p>No path found.</p>"; return; }
+  let html = "<h2>Path</h2>";
+  path.forEach((s,i) => {
+    html += `<div class="claim"><b>${esc(s.name)}</b>${s.relation? ` <span class="rel">—${esc(s.relation)}→</span>`:""}</div>`;
+    if (!nodes.get(s.id)) nodes.add({ id:s.id, label:s.name, type:"work", color:"#888", title:"path" });
+    if (i > 0) {
+      const prev = path[i-1];
+      const eid = `${prev.id}-${s.id}-${s.relation}`;
+      if (!edges.get(eid)) edges.add({ id:eid, from:prev.id, to:s.id, label:s.relation });
+    }
+  });
+  document.getElementById("details").innerHTML = html;
+  network.selectNodes(path.map(s=>s.id));
+  network.fit({ nodes: path.map(s=>s.id) });
+}
+
+function resetView() { network.fit(); }
+document.getElementById("start-btn").addEventListener("click", startExploring);
+document.getElementById("start-input").addEventListener("keydown", e => { if (e.key === "Enter") startExploring(); });
+load();
+</script>
+</body>
+</html>

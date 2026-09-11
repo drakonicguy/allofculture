@@ -1,3 +1,4 @@
 allofculture.db
 allofculture.db-journal
+allofculture.db.bak-*
 __pycache__/
